@@ -49,14 +49,14 @@ resource "ibm_is_security_group_rule" "hpvs_automation_sample_outbound" {
   remote    = "0.0.0.0/0"
 }
 
-# rule that allows inbound traffic to the nginx server
+# rule that allows inbound traffic
 resource "ibm_is_security_group_rule" "hpvs_automation_sample_inbound" {
   group     = ibm_is_security_group.hpvs_automation_sample_security_group.id
   direction = "inbound"
   remote    = "0.0.0.0/0"
   tcp {
     port_min = 80
-    port_max = 80
+    port_max = 8080
   }
 }
 
@@ -68,6 +68,24 @@ resource "ibm_is_subnet" "hpvs_automation_sample_subnet" {
   zone                     = "${var.region}-${var.zone}"
   tags                     = local.tags
 }
+
+# we use a gateway to allow the VSI to connect to the internet to logDNA
+# and docker. Without a gateway the VSI would need a floating IP. Without
+# either the VSI will not be able to connect to the internet despite
+# an outbound rule
+resource "ibm_is_public_gateway" "hpvs_automation_sample_gateway" {
+  name = format("%s-gateway", var.prefix)
+  vpc  = ibm_is_vpc.hpvs_automation_sample_vpc.id
+  zone = "${var.region}-${var.zone}"
+  tags = local.tags
+}
+
+# attach the gateway to the subnet
+resource "ibm_is_subnet_public_gateway_attachment" "lhpvs_automation_sample_gateway_attachment" {
+  subnet         = ibm_is_subnet.hpvs_automation_sample_subnet.id
+  public_gateway = ibm_is_public_gateway.hpvs_automation_sample_gateway.id
+}
+
 
 # create a random key pair, because for formal reasons we need to pass an SSH key into the VSI. It will not be used, that's why
 # it can be random
@@ -106,7 +124,7 @@ resource "ibm_is_instance" "hpvs_automation_sample_vsi" {
   zone    = "${var.region}-${var.zone}"
 
   # the user data field carries the encrypted contract, so all information visible at the hypervisor layer is encrypted
-  user_data = var.contract
+  user_data = chomp(replace(var.contract, "\\n", "\n"))
 
   primary_network_interface {
     name            = "eth0"
